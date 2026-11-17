@@ -1,53 +1,49 @@
-const CACHE_VERSION = 'aerocalc-v4';
-const CORE_CACHE = `${CACHE_VERSION}-core`;
-const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
-const CORE_ASSETS = [
+const CACHE_NAME = 'aircraft-calc-v4';
+const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './icon.svg',
-  './icon-192.png',
-  './icon-512.png'
+  './icon.svg'
 ];
 
-self.addEventListener('install', event => {
+// Install event: cache core assets immediately
+self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CORE_CACHE)
-      .then(cache => cache.addAll(CORE_ASSETS))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
+  self.skipWaiting();
 });
 
-self.addEventListener('activate', event => {
+// Activate event: clear old caches and take control instantly
+self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys
-        .filter(key => ![CORE_CACHE, RUNTIME_CACHE].includes(key))
-        .map(key => caches.delete(key))))
-      .then(() => self.clients.claim())
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      );
+    })
   );
+  self.clients.claim();
 });
 
-self.addEventListener('fetch', event => {
-  const request = event.request;
-  if (request.method !== 'GET') return;
+// Fetch event: Serve from cache, fallback to index.html for page navigation
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      caches.match('./index.html').then((response) => {
+        return response || fetch(event.request);
+      }).catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
 
-  event.respondWith((async () => {
-    const cached = await caches.match(request);
-    if (cached) return cached;
-
-    try {
-      const response = await fetch(request);
-      if (response && (response.ok || response.type === 'opaque')) {
-        const cache = await caches.open(RUNTIME_CACHE);
-        cache.put(request, response.clone()).catch(() => {});
-      }
-      return response;
-    } catch (error) {
-      if (request.mode === 'navigate') {
-        return (await caches.match('./index.html')) || Response.error();
-      }
-      throw error;
-    }
-  })());
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      return cachedResponse || fetch(event.request);
+    })
+  );
 });
